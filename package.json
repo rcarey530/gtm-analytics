@@ -2,21 +2,13 @@
   "name": "gtm-analytics",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "npx ts-node server.ts",
+    "build": "echo 'no build needed'"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/express": "^5.0.6",
-    "@types/node": "^25.9.1",
-    "better-sqlite3": "^12.10.0",
-    "express": "^5.2.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
-  }
+  "type": "commonjs"
 }
