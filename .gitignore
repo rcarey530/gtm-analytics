@@ -1,0 +1,6 @@
+node_modules/
+venv/
+gtm_jobs.db
+dist/
+__pycache__/
+*.pyc
