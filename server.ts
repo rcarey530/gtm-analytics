@@ -1,6 +1,6 @@
 import express from 'express';
-import sqlite3 from 'sqlite3';
 import https from 'https';
+import initSqlJs from 'sql.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static('public'));
 
-const db = new sqlite3.Database(':memory:');
+let db: any;
 
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -16,21 +16,25 @@ function ingestData(): Promise<void> {
     https.get(url, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
+      res.on('end', async () => {
+        const SQL = await initSqlJs();
+        db = new SQL.Database();
+        db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
         const lines = data.trim().split('\n');
-        const headers = lines[0].split(',').map((h) => h.replace(/"/g, '').trim());
-        db.serialize(() => {
-          db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
-          db.run('DELETE FROM job_history');
-          const stmt = db.prepare('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-          lines.slice(1).forEach(line => {
-            const values = line.split(',').map((v) => v.replace(/"/g, '').trim());
-            const row: any = {};
-            headers.forEach((h, i) => { row[h] = values[i] || ''; });
-            stmt.run(row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'', row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'', row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null, row['Job URL']||'', row['Posted On']||'');
-          });
-          stmt.finalize(() => { console.log('Ingested ' + (lines.length-1) + ' records'); resolve(); });
+        const headers = lines[0].split(',').map((h: string) => h.replace(/"/g, '').trim());
+        lines.slice(1).forEach(line => {
+          const values = line.split(',').map((v: string) => v.replace(/"/g, '').trim());
+          const row: any = {};
+          headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
+          db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+            row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'',
+            row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'',
+            row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null,
+            row['Job URL']||'', row['Posted On']||''
+          ]);
         });
+        console.log('Ingested ' + (lines.length-1) + ' records');
+        resolve();
       });
     }).on('error', reject);
   });
@@ -39,26 +43,35 @@ function ingestData(): Promise<void> {
 app.post('/query', (req: any, res: any) => {
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'No query provided' });
-  db.all(sql, [], (err: any, rows: any[]) => {
-    if (err) return res.status(400).json({ error: err.message });
-    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  try {
+    const results = db.exec(sql);
+    if (results.length === 0) return res.json({ columns: [], rows: [], count: 0 });
+    const columns = results[0].columns;
+    const rows = results[0].values.map((row: any[]) => {
+      const obj: any = {};
+      columns.forEach((col: string, i: number) => { obj[col] = row[i]; });
+      return obj;
+    });
     res.json({ columns, rows, count: rows.length });
-  });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.get('/schema', (req: any, res: any) => {
-  db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err: any, tables: any[]) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
     const schema: any = {};
-    let pending = tables.length;
-    if (pending === 0) return res.json(schema);
-    tables.forEach((t: any) => {
-      db.all('PRAGMA table_info(' + t.name + ')', [], (err2: any, cols: any[]) => {
-        schema[t.name] = cols;
-        if (--pending === 0) res.json(schema);
-      });
+    if (tables.length === 0) return res.json(schema);
+    tables[0].values.forEach((row: any[]) => {
+      const name = row[0];
+      const cols = db.exec('PRAGMA table_info(' + name + ')');
+      schema[name] = cols.length > 0 ? cols[0].values.map((c: any[]) => ({ name: c[1], type: c[2] })) : [];
     });
-  });
+    res.json(schema);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 ingestData().then(() => {
