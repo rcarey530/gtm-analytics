@@ -73,7 +73,7 @@ function ingestData(): Promise<void> {
         ]);
         count++;
       });
-      console.log('Ingested ' + count + ' records');
+      console.log('Ingested ' + count + ' records, first header: ' + headers[0] + ', first row company: ' + (rows[1] ? rows[1][1] : 'none'));
       resolve();
     }).catch(reject);
   });
