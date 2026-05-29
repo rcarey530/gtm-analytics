@@ -25,22 +25,31 @@ function fetchUrl(url: string): Promise<string> {
   });
 }
 
-function parseCSVLine(line: string): string[] {
-  const values: string[] = [];
-  let current = '';
+function parseCSV(raw: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    if (line[i] === '"') {
-      inQuotes = !inQuotes;
-    } else if (line[i] === ',' && !inQuotes) {
-      values.push(current.trim());
-      current = '';
+  const data = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i = 0; i < data.length; i++) {
+    const ch = data[i];
+    if (ch === '"') {
+      if (inQuotes && data[i+1] === '"') { cell += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if (ch === ',' && !inQuotes) {
+      row.push(cell.trim());
+      cell = '';
+    } else if (ch === '\n' && !inQuotes) {
+      row.push(cell.trim());
+      if (row.some(v => v !== '')) rows.push(row);
+      row = [];
+      cell = '';
     } else {
-      current += line[i];
+      cell += ch;
     }
   }
-  values.push(current.trim());
-  return values;
+  if (cell || row.length) { row.push(cell.trim()); if (row.some(v => v !== '')) rows.push(row); }
+  return rows;
 }
 
 function ingestData(): Promise<void> {
@@ -50,12 +59,10 @@ function ingestData(): Promise<void> {
       const SQL = await initSqlJs();
       db = new SQL.Database();
       db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
-     const lines = data.trim().replace(/\r/g, '').split('\n');
-      const headers = parseCSVLine(lines[0]);
+      const rows = parseCSV(data);
+      const headers = rows[0];
       let count = 0;
-      lines.slice(1).forEach(line => {
-        if (!line.trim()) return;
-        const values = parseCSVLine(line);
+      rows.slice(1).forEach(values => {
         const row: any = {};
         headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
         db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
