@@ -50,7 +50,7 @@ function ingestData(): Promise<void> {
       const SQL = await initSqlJs();
       db = new SQL.Database();
       db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
-      const lines = data.trim().split('\n');
+     const lines = data.trim().replace(/\r/g, '').split('\n');
       const headers = parseCSVLine(lines[0]);
       let count = 0;
       lines.slice(1).forEach(line => {
