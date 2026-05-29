@@ -25,55 +25,26 @@ function fetchUrl(url: string): Promise<string> {
   });
 }
 
-function parseCSV(raw: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let inQuotes = false;
-  const data = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  for (let i = 0; i < data.length; i++) {
-    const ch = data[i];
-    if (ch === '"') {
-      if (inQuotes && data[i+1] === '"') { cell += '"'; i++; }
-      else { inQuotes = !inQuotes; }
-    } else if (ch === ',' && !inQuotes) {
-      row.push(cell.trim());
-      cell = '';
-    } else if (ch === '\n' && !inQuotes) {
-      row.push(cell.trim());
-      if (row.some(v => v !== '')) rows.push(row);
-      row = [];
-      cell = '';
-    } else {
-      cell += ch;
-    }
-  }
-  if (cell || row.length) { row.push(cell.trim()); if (row.some(v => v !== '')) rows.push(row); }
-  return rows;
-}
-
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ_v9LHrPAHvJpVrEfh83WH7V5gPTBBvuzWuMFmeJmp0XRP3w5LkFd2RlX7WbXL5ftgKs_1rwclngti/pub?gid=2036805849&single=true&output=csv';
+    const url = 'https://raw.githubusercontent.com/rcarey530/rcarey530.github.io/main/job-history.json';
     fetchUrl(url).then(async (data) => {
       const SQL = await initSqlJs();
       db = new SQL.Database();
       db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
-      const rows = parseCSV(data);
-      const headers = rows[0];
+      const parsed = JSON.parse(data);
+      const jobs = parsed.jobs || [];
       let count = 0;
-      rows.slice(1).forEach(values => {
-        const row: any = {};
-        headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
+      jobs.forEach((job: any) => {
         db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
-          row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'',
-          row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'',
-          row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null,
-          row['Job URL']||'', row['Posted On']||''
+          job.week||'', job.company||'', job.jobTitle||'', job.location||'',
+          job.score||null, job.action||'', job.reason||'',
+          job.employees||null, job.funding||null,
+          job.jobUrl||'', job.postedOn||''
         ]);
         count++;
       });
-      console.log('Ingested ' + count + ' records, first header: ' + headers[0] + ', first row company: ' + (rows[1] ? rows[1][1] : 'none'));
+      console.log('Ingested ' + count + ' records from GitHub');
       resolve();
     }).catch(reject);
   });
