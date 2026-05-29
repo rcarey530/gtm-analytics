@@ -108,4 +108,3 @@ app.get('/schema', (req: any, res: any) => {
 
 ingestData().then(() => {
   app.listen(PORT, () => { console.log('GTM Analytics running at http://localhost:' + PORT); });
-}).catch(err => { console.error('Ingest failed:', err); process.exit(1); });
