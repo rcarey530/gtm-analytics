@@ -1,5 +1,5 @@
 import express from 'express';
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
 import https from 'https';
 
 const app = express();
@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static('public'));
 
-const db = new Database('gtm_jobs.db');
+const db = new sqlite3.Database(':memory:');
 
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -18,81 +18,49 @@ function ingestData(): Promise<void> {
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
         const lines = data.trim().split('\n');
-        const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
-        db.exec(`
-          CREATE TABLE IF NOT EXISTS job_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            week TEXT, company TEXT, job_title TEXT, location TEXT,
-            score INTEGER, action TEXT, reason TEXT,
-            employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT
-          )
-        `);
-        db.exec('DELETE FROM job_history');
-        const insert = db.prepare(`
-          INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        const insertMany = db.transaction((rows: any[]) => {
-          for (const row of rows) {
-            insert.run(
-              row['Week'] || '',
-              row['Company'] || '',
-              row['Job Title'] || '',
-              row['Location'] || '',
-              row['Score'] ? parseInt(row['Score']) : null,
-              row['Action'] || '',
-              row['Reason'] || '',
-              row['Employees'] ? parseInt(row['Employees']) : null,
-              row['Funding'] ? parseFloat(row['Funding']) : null,
-              row['Job URL'] || '',
-              row['Posted On'] || ''
-            );
-          }
-        });
-        const rows = lines.slice(1).map(line => {
-          const values = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|^(?=,)|(?<=,)$)/g) || [];
-          const row: any = {};
-          headers.forEach((h, i) => {
-            row[h] = (values[i] || '').replace(/"/g, '').trim();
+        const headers = lines[0].split(',').map((h) => h.replace(/"/g, '').trim());
+        db.serialize(() => {
+          db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
+          db.run('DELETE FROM job_history');
+          const stmt = db.prepare('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          lines.slice(1).forEach(line => {
+            const values = line.split(',').map((v) => v.replace(/"/g, '').trim());
+            const row: any = {};
+            headers.forEach((h, i) => { row[h] = values[i] || ''; });
+            stmt.run(row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'', row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'', row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null, row['Job URL']||'', row['Posted On']||'');
           });
-          return row;
+          stmt.finalize(() => { console.log('Ingested ' + (lines.length-1) + ' records'); resolve(); });
         });
-        insertMany(rows);
-        console.log(`Ingested ${rows.length} records`);
-        resolve();
       });
     }).on('error', reject);
   });
 }
 
-app.post('/query', (req, res) => {
+app.post('/query', (req: any, res: any) => {
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'No query provided' });
-  try {
-    const stmt = db.prepare(sql);
-    const rows = stmt.all() as Record<string, unknown>[];
+  db.all(sql, [], (err: any, rows: any[]) => {
+    if (err) return res.status(400).json({ error: err.message });
     const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
     res.json({ columns, rows, count: rows.length });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
+  });
 });
 
-app.get('/schema', (req, res) => {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as any[];
-  const schema: any = {};
-  tables.forEach((t: any) => {
-    const cols = db.prepare(`PRAGMA table_info(${t.name})`).all();
-    schema[t.name] = cols;
+app.get('/schema', (req: any, res: any) => {
+  db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err: any, tables: any[]) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const schema: any = {};
+    let pending = tables.length;
+    if (pending === 0) return res.json(schema);
+    tables.forEach((t: any) => {
+      db.all('PRAGMA table_info(' + t.name + ')', [], (err2: any, cols: any[]) => {
+        schema[t.name] = cols;
+        if (--pending === 0) res.json(schema);
+      });
+    });
   });
-  res.json(schema);
 });
 
 ingestData().then(() => {
-  app.listen(PORT, () => {
-    console.log(`GTM Analytics running at http://localhost:${PORT}`);
-  });
-}).catch(err => {
-  console.error('Ingest failed:', err);
-  process.exit(1);
-});
+  app.listen(PORT, () => { console.log('GTM Analytics running at http://localhost:' + PORT); });
+}).catch(err => { console.error('Ingest failed:', err); process.exit(1); });
