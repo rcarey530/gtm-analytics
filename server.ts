@@ -1,5 +1,6 @@
 import express from 'express';
 import https from 'https';
+import http from 'http';
 import initSqlJs from 'sql.js';
 
 const app = express();
@@ -10,33 +11,43 @@ app.use(express.static('public'));
 
 let db: any;
 
+function fetchUrl(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    protocol.get(url, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchUrl(res.headers.location!).then(resolve).catch(reject);
+      }
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
+}
+
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ_v9LHrPAHvJpVrEfh83WH7V5gPTBBvuzWuMFmeJmp0XRP3w5LkFd2RlX7WbXL5ftgKs_1rwclngti/pub?gid=2036805849&single=true&output=csv';
-    https.get(url, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', async () => {
-        const SQL = await initSqlJs();
-        db = new SQL.Database();
-        db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
-        const lines = data.trim().split('\n');
-        const headers = lines[0].split(',').map((h: string) => h.replace(/"/g, '').trim());
-        lines.slice(1).forEach(line => {
-          const values = line.split(',').map((v: string) => v.replace(/"/g, '').trim());
-          const row: any = {};
-          headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
-          db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
-            row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'',
-            row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'',
-            row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null,
-            row['Job URL']||'', row['Posted On']||''
-          ]);
-        });
-        console.log('Ingested ' + (lines.length-1) + ' records');
-        resolve();
+    fetchUrl(url).then(async (data) => {
+      const SQL = await initSqlJs();
+      db = new SQL.Database();
+      db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
+      const lines = data.trim().split('\n');
+      const headers = lines[0].split(',').map((h: string) => h.replace(/"/g, '').trim());
+      lines.slice(1).forEach(line => {
+        const values = line.split(',').map((v: string) => v.replace(/"/g, '').trim());
+        const row: any = {};
+        headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
+        db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+          row['Week']||'', row['Company']||'', row['Job Title']||'', row['Location']||'',
+          row['Score']?parseInt(row['Score']):null, row['Action']||'', row['Reason']||'',
+          row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null,
+          row['Job URL']||'', row['Posted On']||''
+        ]);
       });
-    }).on('error', reject);
+      console.log('Ingested ' + (lines.length-1) + ' records');
+      resolve();
+    }).catch(reject);
   });
 }
 
