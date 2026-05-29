@@ -14,7 +14,7 @@ let db: any;
 function fetchUrl(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
-    protocol.get(url, (res) => {
+    protocol.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GTMAnalytics/1.0)' } }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         return fetchUrl(res.headers.location!).then(resolve).catch(reject);
       }
