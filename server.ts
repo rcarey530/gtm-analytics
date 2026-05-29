@@ -25,6 +25,24 @@ function fetchUrl(url: string): Promise<string> {
   });
 }
 
+function parseCSVLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') {
+      inQuotes = !inQuotes;
+    } else if (line[i] === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += line[i];
+    }
+  }
+  values.push(current.trim());
+  return values;
+}
+
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ_v9LHrPAHvJpVrEfh83WH7V5gPTBBvuzWuMFmeJmp0XRP3w5LkFd2RlX7WbXL5ftgKs_1rwclngti/pub?gid=2036805849&single=true&output=csv';
@@ -33,9 +51,11 @@ function ingestData(): Promise<void> {
       db = new SQL.Database();
       db.run('CREATE TABLE IF NOT EXISTS job_history (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, company TEXT, job_title TEXT, location TEXT, score INTEGER, action TEXT, reason TEXT, employees INTEGER, funding REAL, job_url TEXT, posted_on TEXT)');
       const lines = data.trim().split('\n');
-      const headers = lines[0].split(',').map((h: string) => h.replace(/"/g, '').trim());
+      const headers = parseCSVLine(lines[0]);
+      let count = 0;
       lines.slice(1).forEach(line => {
-        const values = line.split(',').map((v: string) => v.replace(/"/g, '').trim());
+        if (!line.trim()) return;
+        const values = parseCSVLine(line);
         const row: any = {};
         headers.forEach((h: string, i: number) => { row[h] = values[i] || ''; });
         db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
@@ -44,8 +64,9 @@ function ingestData(): Promise<void> {
           row['Employees']?parseInt(row['Employees']):null, row['Funding']?parseFloat(row['Funding']):null,
           row['Job URL']||'', row['Posted On']||''
         ]);
+        count++;
       });
-      console.log('Ingested ' + (lines.length-1) + ' records');
+      console.log('Ingested ' + count + ' records');
       resolve();
     }).catch(reject);
   });
