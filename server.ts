@@ -2,15 +2,11 @@ import express from 'express';
 import https from 'https';
 import http from 'http';
 import initSqlJs from 'sql.js';
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 app.use(express.json());
 app.use(express.static('public'));
-
 let db: any;
-
 function fetchUrl(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
@@ -24,7 +20,6 @@ function fetchUrl(url: string): Promise<string> {
     }).on('error', reject);
   });
 }
-
 function ingestData(): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = 'https://raw.githubusercontent.com/rcarey530/rcarey530.github.io/main/job-history.json';
@@ -37,10 +32,17 @@ function ingestData(): Promise<void> {
       let count = 0;
       jobs.forEach((job: any) => {
         db.run('INSERT INTO job_history (week, company, job_title, location, score, action, reason, employees, funding, job_url, posted_on) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
-          job.week||'', job.company||'', job.jobTitle||'', job.location||'',
-          job.score||null, job.action||'', job.reason||'',
-          job.employees||null, job.funding||null,
-          job.jobUrl||'', job.postedOn||''
+          job.week||job['Week']||'',
+          job.company||job['Company']||'',
+          job.jobTitle||job['Job Title']||'',
+          job.location||job['Location']||'',
+          job.score||job['Score']||null,
+          job.action||job['Action']||'',
+          job.reason||job['Reason']||'',
+          job.employees||job['Employees']||null,
+          job.funding||job['Funding']||null,
+          job.jobUrl||job['Job URL']||'',
+          job.postedOn||job['Posted On']||''
         ]);
         count++;
       });
@@ -49,7 +51,6 @@ function ingestData(): Promise<void> {
     }).catch(reject);
   });
 }
-
 app.post('/query', (req: any, res: any) => {
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'No query provided' });
@@ -67,7 +68,6 @@ app.post('/query', (req: any, res: any) => {
     res.status(400).json({ error: err.message });
   }
 });
-
 app.get('/schema', (req: any, res: any) => {
   try {
     const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
@@ -83,7 +83,6 @@ app.get('/schema', (req: any, res: any) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 ingestData().then(() => {
   app.listen(PORT, () => { console.log('GTM Analytics running at http://localhost:' + PORT); });
 }).catch(err => { console.error('Ingest failed:', err); process.exit(1); });
