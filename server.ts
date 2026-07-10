@@ -2,8 +2,18 @@ import express from 'express';
 import https from 'https';
 import http from 'http';
 import initSqlJs from 'sql.js';
+import cookieParser from 'cookie-parser';
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.use(cookieParser());
+app.use((req, res, next) => {
+  if (req.query.key === 'rc530') {
+    res.cookie('access', 'rc530', { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000 });
+    return next();
+  }
+  if (req.cookies && req.cookies.access === 'rc530') return next();
+  return res.status(404).send('Not found');
+});
 app.use(express.json());
 app.use(express.static('public'));
 let db: any;
